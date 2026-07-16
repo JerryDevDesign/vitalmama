@@ -33,3 +33,26 @@ export const sendTriageMessage = async (
     };
   }
 };
+
+// --- NEW: Transcribe Audio Helper ---
+export const transcribeAudioFile = async (audioBlob: Blob): Promise<string> => {
+  try {
+    const formData = new FormData();
+    formData.append("file", audioBlob, "recording.wav");
+
+    const response = await fetch("http://127.0.0.1:8000/api/transcribe", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error("Transcription server error");
+    }
+
+    const data = await response.json();
+    return data.transcript;
+  } catch (error) {
+    console.error("Failed to transcribe audio:", error);
+    throw error;
+  }
+};

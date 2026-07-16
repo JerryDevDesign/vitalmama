@@ -1,24 +1,22 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence, Variants } from "framer-motion";
-import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   Activity,
   Heart,
-  Calendar,
   AlertCircle,
   Play,
-  CheckCircle,
   Menu,
-  ArrowRight,
-  Smartphone,
-  ShieldCheck,
-  PhoneCall,
   Send,
-  Loader2
+  Loader2,
+  Home as HomeIcon,
+  BookOpen,
+  PhoneCall,
+  Mic,
+  MicOff
 } from "lucide-react";
-import { sendTriageMessage } from "./api";
+import { sendTriageMessage, transcribeAudioFile } from "./api";
 
 interface Message {
   id: string;
@@ -28,9 +26,10 @@ interface Message {
 }
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<"home" | "guides" | "emergency">("home");
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   
-  // Real-time Chat States
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -42,31 +41,129 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll the phone mockup chat screen on new messages
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  
+  // MediaRecorder Refs for capturing raw audio
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      synthRef.current = window.speechSynthesis;
+    }
+    return () => {
+      if (synthRef.current) synthRef.current.cancel();
+    };
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
+  const toggleVoiceGuide = () => {
+    if (!synthRef.current) return;
 
-    const userText = inputValue;
+    if (isPlaying) {
+      synthRef.current.cancel();
+      setIsPlaying(false);
+    } else {
+      const lastBotMessage = [...messages].reverse().find((m) => m.sender === "bot");
+      if (!lastBotMessage) return;
+
+      synthRef.current.cancel();
+      const utterance = new SpeechSynthesisUtterance(lastBotMessage.text);
+      utteranceRef.current = utterance;
+
+      const voices = synthRef.current.getVoices();
+      const selectedVoice = voices.find(v => v.lang.includes("en-NG") || v.lang.includes("en-GB") || v.lang.includes("en"));
+      if (selectedVoice) utterance.voice = selectedVoice;
+
+      utterance.rate = 0.85; 
+      utterance.pitch = 1.0;
+      utterance.onend = () => setIsPlaying(false);
+      utterance.onerror = () => setIsPlaying(false);
+
+      setIsPlaying(true);
+      synthRef.current.speak(utterance);
+    }
+  };
+
+  // --- Whisper Media Recording Logic ---
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        setIsLoading(true);
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
+        
+        try {
+          // Transcribe using backend Whisper API
+          const textTranscript = await transcribeAudioFile(audioBlob);
+          if (textTranscript.trim()) {
+            setInputValue(textTranscript);
+            // Submit the transcribed text instantly to the Chat flow
+            await handleSendMessage(undefined, textTranscript);
+          }
+        } catch (err) {
+          console.error("Transcription pipeline failed", err);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsListening(true);
+    } catch (err) {
+      console.error("Microphone access blocked or unsupported", err);
+      alert("Please ensure microphone permissions are granted.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isListening) {
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
+      // Turn off microphone input device stream
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopRecording();
+    } else {
+      if (synthRef.current && isPlaying) {
+        synthRef.current.cancel();
+        setIsPlaying(false);
+      }
+      startRecording();
+    }
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent, directText?: string) => {
+    if (e) e.preventDefault();
+    const textToSend = directText || inputValue;
+    if (!textToSend.trim() || isLoading) return;
+
     setInputValue("");
     
-    // 1. Add user's message to the chat view
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: userText,
-    };
+    const userMsg: Message = { id: Date.now().toString(), sender: "user", text: textToSend };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
-    // 2. Call local Python Backend
-    const data = await sendTriageMessage(userText, 28);
+    const data = await sendTriageMessage(textToSend, 28);
 
-    // 3. Add AI response to the chat view
     const botMsg: Message = {
       id: (Date.now() + 1).toString(),
       sender: "bot",
@@ -78,244 +175,175 @@ export default function Home() {
     setIsLoading(false);
   };
 
-  const containerVariants: Variants = {
-    hidden: { opacity: 0 },
-    visible: { opacity: 1, transition: { staggerChildren: 0.15 } }
-  };
-
-  const itemVariants: Variants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 100 } }
-  };
-
   return (
-    <div className="flex flex-col min-h-screen bg-[#FAFAF9] font-sans selection:bg-[#E2F0D9] selection:text-[#2E5A44]">
-      
-      {/* Navigation */}
-      <header className="sticky top-0 z-50 backdrop-blur-md bg-[#FAFAF9]/80 border-b border-slate-100 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <div className="min-h-screen bg-[#F4F4F3] flex items-center justify-center font-sans antialiased">
+      <div className="w-full h-screen sm:h-[840px] sm:max-w-[410px] sm:rounded-[40px] sm:shadow-2xl sm:border-[8px] sm:border-slate-800 bg-[#FAFAF9] overflow-hidden flex flex-col relative text-slate-800">
+        <div className="h-6 bg-white shrink-0 hidden sm:block" />
+
+        {/* Header */}
+        <header className="bg-white px-5 py-4 flex items-center justify-between border-b border-slate-100 shrink-0 shadow-sm">
           <div className="flex items-center gap-2">
-            <div className="bg-[#2E5A44] p-2 rounded-xl text-white">
-              <Activity className="h-6 w-6" />
+            <div className="bg-[#2E5A44] p-1.5 rounded-xl text-white">
+              <Activity className="h-4 w-4" />
             </div>
-            <span className="text-xl font-bold tracking-tight text-[#1C3E2F]">
+            <span className="text-base font-extrabold tracking-tight text-[#1C3E2F]">
               Vital<span className="text-[#65A765]">Mama</span>
             </span>
           </div>
-          
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-            <a href="#features" className="hover:text-[#2E5A44] transition-colors">Features</a>
-            <Link href="/impact" className="hover:text-[#2E5A44] transition-colors">Our Impact</Link>
-            <a href="#preview" className="hover:text-[#2E5A44] transition-colors">App Preview</a>
-          </nav>
+          <Menu className="h-5 w-5 text-slate-500" />
+        </header>
 
-          <div className="flex items-center gap-4 relative z-50">
-            <Link href="/dashboard">
-              <button className="bg-[#2E5A44] hover:bg-[#234735] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all shadow-sm hover:shadow-md">
-                Launch Web App
-              </button>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Hero Section */}
-      <section className="relative overflow-hidden px-6 pt-12 pb-24 lg:pt-20 lg:pb-32">
-        <div className="absolute top-0 right-1/4 w-[400px] h-[400px] bg-[#EAF5E5] rounded-full filter blur-[100px] -z-10 opacity-70" />
-        <div className="absolute bottom-10 left-10 w-[300px] h-[300px] bg-[#F9F0E1] rounded-full filter blur-[80px] -z-10 opacity-60" />
-
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          
-          {/* Left Column Text */}
-          <motion.div 
-            className="lg:col-span-6 flex flex-col space-y-6"
-            initial="hidden"
-            animate="visible"
-            variants={containerVariants}
-          >
-            <motion.div variants={itemVariants} className="inline-flex items-center gap-2 bg-[#E2F0D9] text-[#2E5A44] px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider w-fit">
-              ✨ Modern Maternal Health PWA
-            </motion.div>
-            
-            <motion.h1 variants={itemVariants} className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-[#1C3E2F] leading-[1.1]">
-              Critical Care. <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#2E5A44] to-[#65A765]">Anywhere, Offline or Online.</span>
-            </motion.h1>
-
-            <motion.p variants={itemVariants} className="text-lg text-slate-600 leading-relaxed max-w-2xl">
-              A responsive, progressive web experience built to empower mothers. Access autonomous triage guides, track key gestational milestones, and bridge communication barriers with voice-first local accent guides.
-            </motion.p>
-
-            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-4 pt-4">
-              <Link href="/register" className="inline-flex items-center justify-center bg-[#2E5A44] hover:bg-[#234735] text-white font-semibold px-8 py-4 rounded-xl transition-all shadow-md group">
-                Install App & Onboard
-                <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
-              </Link>
-              <a href="#features" className="inline-flex items-center justify-center bg-white border border-slate-200 hover:border-slate-300 text-slate-700 font-semibold px-8 py-4 rounded-xl transition-all shadow-sm">
-                How It Works
-              </a>
-            </motion.div>
-          </motion.div>
-
-          {/* Right Column: Interactive PWA App Mockup */}
-          <div id="preview" className="lg:col-span-6 flex flex-col items-center">
-            <div className="relative mx-auto w-full max-w-[340px] bg-slate-900 rounded-[48px] p-3.5 shadow-2xl border-4 border-slate-800">
-              
-              {/* Phone Notch */}
-              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 h-5 w-32 bg-slate-900 rounded-b-2xl z-20 flex justify-center items-center">
-                <div className="w-12 h-1 bg-slate-800 rounded-full" />
-              </div>
-
-              {/* PWA Screen View */}
-              <div className="w-full aspect-[9/19] bg-[#FAFAF9] rounded-[38px] overflow-hidden flex flex-col select-none relative text-slate-800">
-                
-                {/* PWA App Status Bar */}
-                <div className="bg-white px-6 pt-10 pb-3 flex items-center justify-between border-b border-slate-100 shrink-0">
-                  <div className="flex items-center gap-2">
-                    <div className="bg-[#2E5A44] p-1.5 rounded-lg text-white">
-                      <Activity className="h-4 w-4" />
+        {/* Body content based on tab selection */}
+        <div className="flex-1 overflow-hidden flex flex-col bg-[#FAF9F6]">
+          <AnimatePresence mode="wait">
+            {activeTab === "home" && (
+              <motion.div 
+                key="home" 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="flex-1 flex flex-col overflow-hidden"
+              >
+                {/* Progress Card */}
+                <div className="bg-white p-4 mx-4 mt-4 rounded-2xl border border-slate-100 shadow-sm space-y-3 shrink-0">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Patient Status</p>
+                      <h4 className="text-sm font-extrabold text-slate-800">Amina Oke</h4>
                     </div>
-                    <span className="text-xs font-bold tracking-tight text-[#1C3E2F]">VitalMama</span>
+                    <span className="text-xs bg-[#E2F0D9] text-[#2E5A44] font-bold px-3 py-1 rounded-full shadow-sm">Week 28</span>
                   </div>
-                  <Menu className="h-4 w-4 text-slate-400" />
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-pink-50 rounded-xl text-pink-500 shrink-0">
+                      <Heart className="h-4 w-4 fill-pink-500" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
+                        <span>Gestational Progress</span>
+                        <span>70%</span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                        <div className="bg-gradient-to-r from-pink-400 to-[#65A765] h-full w-[70%]" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Patient Overview Card (Shrunk slightly to make room for chat) */}
-                <div className="bg-white px-4 py-2.5 border-b border-slate-100 flex items-center justify-between shrink-0">
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800 leading-tight">Amina Oke</h4>
-                    <p className="text-[9px] text-slate-400 font-medium">Gestational Progress</p>
-                  </div>
-                  <span className="text-[9px] bg-[#E2F0D9] text-[#2E5A44] font-bold px-2 py-0.5 rounded-full">
-                    Week 28 (70%)
-                  </span>
-                </div>
-
-                {/* Real-time Triage Chat Interface */}
-                <div className="flex-1 overflow-y-auto p-3 space-y-3 flex flex-col bg-[#FAF9F6]">
+                {/* Chat Message Box */}
+                <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 flex flex-col">
                   {messages.map((msg) => (
                     <div
                       key={msg.id}
-                      className={`max-w-[85%] rounded-2xl p-3 text-[11px] leading-relaxed shadow-sm ${
+                      className={`max-w-[85%] rounded-2xl p-3.5 text-xs leading-relaxed shadow-sm ${
                         msg.sender === "user"
                           ? "bg-[#2E5A44] text-white self-end rounded-br-none"
                           : "bg-white text-slate-800 self-start rounded-bl-none border border-slate-100"
                       }`}
                     >
                       <p className="whitespace-pre-wrap">{msg.text}</p>
-                      
-                      {/* Risk Alert Badge for Triage Results */}
                       {msg.riskStatus && (
-                        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center gap-1.5">
-                          <span className={`inline-block w-2 h-2 rounded-full ${
-                            msg.riskStatus === "Critical" ? "bg-red-500 animate-pulse" : "bg-emerald-500"
-                          }`} />
-                          <span className="text-[9px] font-bold text-slate-500 uppercase">
-                            Risk: {msg.riskStatus}
-                          </span>
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center gap-1.5">
+                          <span className={`inline-block w-2.5 h-2.5 rounded-full ${msg.riskStatus === "Critical" ? "bg-red-500 animate-pulse" : "bg-emerald-500"}`} />
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Triage Status: {msg.riskStatus}</span>
                         </div>
                       )}
                     </div>
                   ))}
-
-                  {/* Loading indicator */}
                   {isLoading && (
-                    <div className="bg-white border border-slate-100 rounded-2xl p-3 text-[11px] self-start rounded-bl-none shadow-sm flex items-center gap-2 max-w-[85%]">
-                      <Loader2 className="h-3 w-3 animate-spin text-[#2E5A44]" />
-                      <span className="text-slate-400 italic">Thinking...</span>
+                    <div className="bg-white border border-slate-100 rounded-2xl p-3.5 text-xs self-start rounded-bl-none shadow-sm flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[#2E5A44]" />
+                      <span className="text-slate-400 italic">Processing audio transcript...</span>
                     </div>
                   )}
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Accent Audio Card (Docked above input) */}
-                <div className="bg-white px-3 py-2 border-t border-slate-100 flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
+                {/* Localized Audio Playback Bar */}
+                <div className="bg-white px-4 py-3 border-t border-slate-100 flex items-center justify-between shrink-0 shadow-inner">
+                  <div className="flex items-center gap-3">
                     <button 
-                      onClick={() => setIsPlaying(!isPlaying)}
-                      className="bg-[#2E5A44] p-1.5 rounded-lg text-white hover:bg-[#234735]"
+                      type="button"
+                      onClick={toggleVoiceGuide}
+                      className="bg-[#2E5A44] p-2.5 rounded-xl text-white hover:bg-[#234735] transition-colors"
                     >
-                      <Play className="h-2.5 w-2.5 fill-white" />
+                      <Play className={`h-3.5 w-3.5 fill-white ${isPlaying ? "animate-pulse" : ""}`} />
                     </button>
                     <div>
-                      <p className="text-[9px] font-bold text-slate-800 leading-tight">Nigerian Accent Guide</p>
+                      <p className="text-xs font-bold text-slate-800">Trimester 3 Clinical Guide</p>
+                      <p className="text-[10px] text-slate-400 font-medium">Audio (Nigerian Accent Dialect)</p>
                     </div>
                   </div>
-                  {isPlaying && <span className="text-[8px] text-emerald-500 font-semibold animate-pulse">Playing</span>}
+                  {isPlaying && <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full animate-pulse border border-emerald-100">Speaking...</span>}
                 </div>
 
-                {/* Input Bar (Type & Send message to backend) */}
-                <form onSubmit={handleSendMessage} className="bg-white border-t border-slate-100 p-2 flex gap-1.5 items-center shrink-0">
+                {/* Input Controls */}
+                <form onSubmit={(e) => handleSendMessage(e)} className="bg-white border-t border-slate-100 p-3 flex gap-2 items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={toggleListening}
+                    className={`p-3 rounded-2xl transition-all shadow-md active:scale-95 ${isListening ? "bg-red-500 text-white animate-pulse" : "bg-[#E2F0D9] text-[#2E5A44] hover:bg-[#d0e5c5]"}`}
+                  >
+                    {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  </button>
                   <input
                     type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
-                    placeholder="Type symptom or speak..."
+                    placeholder={isListening ? "Listening closely... Tap to stop" : "Describe symptoms or ask anything..."}
                     disabled={isLoading}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:border-[#2E5A44] text-slate-800 disabled:opacity-50"
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-xs focus:outline-none focus:border-[#2E5A44] text-slate-800"
                   />
                   <button
                     type="submit"
                     disabled={isLoading || !inputValue.trim()}
-                    className="bg-[#2E5A44] text-white p-2 rounded-xl hover:bg-[#234735] disabled:opacity-50 transition-colors"
+                    className="bg-[#2E5A44] text-white p-3 rounded-2xl hover:bg-[#234735]"
                   >
-                    <Send className="h-3.5 w-3.5" />
+                    <Send className="h-4 w-4" />
                   </button>
                 </form>
+              </motion.div>
+            )}
 
-              </div>
-            </div>
-          </div>
-          
+            {/* Guides Section */}
+            {activeTab === "guides" && (
+              <motion.div key="guides" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 p-6 space-y-4 overflow-y-auto">
+                <h3 className="text-lg font-bold text-slate-800">Maternal Education Hub</h3>
+                <p className="text-xs text-slate-500">Offline-optimized audio lessons for your pregnancy stage.</p>
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-2">
+                  <h4 className="text-xs font-bold text-[#2E5A44]">Lesson 1: Preeclampsia Warning Signs</h4>
+                  <p className="text-[11px] text-slate-500">Learn how to spot dangerous blood pressure elevations at home.</p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Emergency tab */}
+            {activeTab === "emergency" && (
+              <motion.div key="emergency" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 p-6 space-y-4 overflow-y-auto text-center justify-center flex flex-col">
+                <AlertCircle className="h-12 w-12 text-red-500 mx-auto animate-bounce" />
+                <h3 className="text-lg font-bold text-slate-800">Emergency Dispatch</h3>
+                <p className="text-xs text-slate-500">Instantly register critical cases directly to local transport networks.</p>
+                <button className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 rounded-2xl text-xs mt-4">Trigger Emergency Assistance</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </section>
 
-      {/* Feature Section */}
-      <section id="features" className="bg-[#F5F5F0] py-20 px-6 border-y border-slate-200">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center space-y-4 mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#1C3E2F]">The Maternal Support Architecture</h2>
-            <p className="text-slate-600 max-w-2xl mx-auto">Universal access to medical knowledge, optimized specifically to run lightweight on modern PWA containers.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-              <div className="p-3 bg-[#E2F0D9] w-fit rounded-xl text-[#2E5A44] mb-6">
-                <PhoneCall className="h-6 w-6" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-3">Localized Voice Guides</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Interact with voice-first maternal support custom-tailored with familiar pacing, regional accents, and supportive vocabulary.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-              <div className="p-3 bg-[#E2F0D9] w-fit rounded-xl text-[#2E5A44] mb-6">
-                <Smartphone className="h-6 w-6" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-3">Lightweight Footprint</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Designed to download in seconds and work flawlessly over standard 3G/2G network environments, bypassing high-cost bandwidth hurdles.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-              <div className="p-3 bg-[#E2F0D9] w-fit rounded-xl text-[#2E5A44] mb-6">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <h3 className="text-xl font-bold text-slate-800 mb-3">Autonomous Screening</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Step-by-step risk-screening metrics designed to flag alerts instantly and interface directly with supportive local clinic hubs.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="py-8 text-center text-xs text-slate-400 bg-[#FAFAF9]">
-        © 2026 VitalMama Platform. All rights reserved.
-      </footer>
+        {/* Tab Bar */}
+        <nav className="bg-white border-t border-slate-100 py-3 px-6 flex justify-between items-center shrink-0 shadow-lg">
+          <button type="button" onClick={() => setActiveTab("home")} className={`flex flex-col items-center gap-1 ${activeTab === "home" ? "text-[#2E5A44]" : "text-slate-400"}`}>
+            <HomeIcon className="h-5 w-5" />
+            <span className="text-[10px] font-bold">Home</span>
+          </button>
+          <button type="button" onClick={() => setActiveTab("guides")} className={`flex flex-col items-center gap-1 ${activeTab === "guides" ? "text-[#2E5A44]" : "text-slate-400"}`}>
+            <BookOpen className="h-5 w-5" />
+            <span className="text-[10px] font-bold">Guides</span>
+          </button>
+          <button type="button" onClick={() => setActiveTab("emergency")} className={`flex flex-col items-center gap-1 ${activeTab === "emergency" ? "text-red-500" : "text-slate-400"}`}>
+            <PhoneCall className="h-5 w-5" />
+            <span className="text-[10px] font-bold">Emergency</span>
+          </button>
+        </nav>
+      </div>
     </div>
   );
 }
