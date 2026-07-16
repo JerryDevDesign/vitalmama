@@ -3,8 +3,11 @@ export interface TriageResponse {
   risk_status: "Normal" | "Critical" | "Error";
 }
 
-// Detects if the app is running in production (on Vercel) or local development
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
+
+const response = await fetch(`${BACKEND_URL}/api/chat`, { ... })
+
+const response = await fetch(`${BACKEND_URL}/api/transcribe`, { ... })
 
 export const sendTriageMessage = async (
   userMessage: string,
