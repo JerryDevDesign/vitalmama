@@ -1,0 +1,252 @@
+"use client";
+
+import React, { useState } from "react";
+import { motion } from "framer-motion";
+import Link from "next/link";
+import { 
+  Activity, 
+  Users, 
+  Bell, 
+  AlertTriangle, 
+  CheckCircle, 
+  Phone, 
+  MapPin, 
+  ArrowLeft,
+  Filter,
+  Search,
+  CheckCircle2,
+  AlertCircle
+} from "lucide-react";
+
+interface TriageCase {
+  id: string;
+  name: string;
+  phone: string;
+  weeks: number;
+  location: string;
+  symptoms: string;
+  status: "Critical" | "Warning" | "Normal";
+  source: "PWA App" | "Voice System";
+  time: string;
+}
+
+export default function Dashboard() {
+  const [filter, setFilter] = useState<"All" | "Critical" | "Warning" | "Normal">("All");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const initialCases: TriageCase[] = [
+    {
+      id: "VM-104",
+      name: "Chinyere Okeke",
+      phone: "+234 803 111 2222",
+      weeks: 32,
+      location: "Ife Central Node B",
+      symptoms: "Severe headache, blurred vision, sudden facial swelling (Preeclampsia risk)",
+      status: "Critical",
+      source: "PWA App",
+      time: "2 mins ago",
+    },
+    {
+      id: "VM-101",
+      name: "Aminat Bello",
+      phone: "+234 812 333 4444",
+      weeks: 24,
+      location: "Modakeke Community Clinic",
+      symptoms: "Mild lower abdominal pain, normal baby movement logged",
+      status: "Warning",
+      source: "PWA App",
+      time: "15 mins ago",
+    },
+    {
+      id: "VM-098",
+      name: "Funmilayo Adebayo",
+      phone: "+234 905 555 6666",
+      weeks: 18,
+      location: "Ife East Outreach Hub",
+      symptoms: "Daily check completed: All physiological parameters within normal limits",
+      status: "Normal",
+      source: "PWA App",
+      time: "2 hours ago",
+    },
+  ];
+
+  const filteredCases = initialCases.filter((c) => {
+    const matchesFilter = filter === "All" || c.status === filter;
+    const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          c.id.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  return (
+    <div className="min-h-screen bg-[#FAFAF9] text-slate-900 font-sans flex flex-col">
+      {/* Top Header */}
+      <header className="bg-[#2E5A44] text-white px-6 py-4 shadow-sm">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="hover:opacity-85 mr-2">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div className="bg-white/10 p-1.5 rounded-lg">
+              <Activity className="h-5 w-5 text-emerald-300" />
+            </div>
+            <span className="text-lg font-bold tracking-tight">
+              VitalMama <span className="text-emerald-300 font-normal">Clinician Hub</span>
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Bell className="h-5 w-5 text-emerald-100 cursor-pointer hover:text-white" />
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
+            </div>
+            <div className="h-8 w-8 rounded-full bg-emerald-700 border border-emerald-500 flex items-center justify-center font-bold text-xs text-emerald-100">
+              CM
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Grid Dashboard Layout */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* Left Side: Real-Time Stats Bar */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+            <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider">Active PWA Node Stats</h3>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-[#F3F7F2] p-4 rounded-xl border border-[#E2F0D9]">
+                <span className="text-[10px] uppercase font-bold text-[#2E5A44]">PWA Registrations</span>
+                <p className="text-2xl font-extrabold text-[#1C3E2F] mt-1">1,402</p>
+              </div>
+              <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+                <span className="text-[10px] uppercase font-bold text-red-700">Critical Alerts</span>
+                <p className="text-2xl font-extrabold text-red-800 mt-1">1</p>
+              </div>
+            </div>
+
+            <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#F5EAD4] flex items-center gap-4">
+              <Users className="h-8 w-8 text-[#D0963E]" />
+              <div>
+                <h4 className="text-xs font-bold text-slate-800">Assigned Clinical Team</h4>
+                <p className="text-[10px] text-slate-500 mt-0.5">Your area has 12 midwives online.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+            <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider">PWA Triage Protocol</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              When a mother triggers an <span className="text-red-500 font-bold">Alert</span> on her PWA mobile app, physiological parameters automatically pipe directly into this feed. Confirm emergency dispatch details below.
+            </p>
+          </div>
+        </div>
+
+        {/* Right Side: Triage Feed */}
+        <div className="lg:col-span-8 space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+            
+            {/* Search */}
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search active cases by patient..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 focus:border-[#2E5A44] rounded-xl text-sm outline-none transition-all"
+              />
+            </div>
+
+            {/* Filters */}
+            <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+              <Filter className="h-4 w-4 text-slate-400 shrink-0" />
+              {(["All", "Critical", "Warning", "Normal"] as const).map((lvl) => (
+                <button
+                  key={lvl}
+                  onClick={() => setFilter(lvl)}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-bold transition-all shrink-0 ${
+                    filter === lvl 
+                      ? "bg-[#2E5A44] text-white" 
+                      : "bg-slate-50 hover:bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+
+          </div>
+
+          {/* Active Triage Feed Cards */}
+          <div className="space-y-4">
+            {filteredCases.length > 0 ? (
+              filteredCases.map((c) => (
+                <motion.div 
+                  key={c.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`bg-white p-6 rounded-2xl border transition-all shadow-sm flex flex-col md:flex-row justify-between gap-4 ${
+                    c.status === "Critical" 
+                      ? "border-red-200 hover:border-red-300 bg-red-50/10" 
+                      : c.status === "Warning" 
+                      ? "border-amber-200 hover:border-amber-300" 
+                      : "border-slate-100 hover:border-slate-200"
+                  }`}
+                >
+                  <div className="space-y-3 flex-1">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="text-xs font-mono font-bold text-slate-400">{c.id}</span>
+                      <h4 className="font-extrabold text-slate-800 text-base">{c.name}</h4>
+                      
+                      <span className={`text-[9px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                        c.status === "Critical" 
+                          ? "bg-red-100 text-red-700" 
+                          : c.status === "Warning" 
+                          ? "bg-amber-100 text-amber-700" 
+                          : "bg-emerald-100 text-[#2E5A44]"
+                      }`}>
+                        {c.status}
+                      </span>
+
+                      <span className="text-[9px] bg-slate-100 text-slate-500 font-bold px-2 py-0.5 rounded-md">
+                        {c.source}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-slate-700 leading-relaxed font-medium">
+                      {c.symptoms}
+                    </p>
+
+                    <div className="flex flex-wrap gap-x-6 gap-y-2 pt-2 text-xs text-slate-500">
+                      <span className="flex items-center gap-1"><Phone className="h-3.5 w-3.5" /> {c.phone}</span>
+                      <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {c.location}</span>
+                      <span className="font-bold text-slate-600">{c.weeks} Weeks Gestation</span>
+                    </div>
+                  </div>
+
+                  <div className="flex md:flex-col justify-between items-end gap-2 shrink-0 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100">
+                    <span className="text-[10px] text-slate-400 font-medium">{c.time}</span>
+                    <button className={`text-xs font-bold px-4 py-2 rounded-xl transition-all ${
+                      c.status === "Critical" 
+                        ? "bg-red-600 hover:bg-red-700 text-white shadow-sm" 
+                        : "bg-slate-50 hover:bg-slate-100 text-slate-700"
+                    }`}>
+                      {c.status === "Critical" ? "Dispatch Call" : "Open Record"}
+                    </button>
+                  </div>
+                </motion.div>
+              ))
+            ) : (
+              <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
+                <p className="text-sm text-slate-400">No triage alerts match this filter level.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
