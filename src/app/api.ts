@@ -3,12 +3,15 @@ export interface TriageResponse {
   risk_status: "Normal" | "Critical" | "Error";
 }
 
+// Detects if the app is running in production (on Vercel) or local development
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
+
 export const sendTriageMessage = async (
   userMessage: string,
   stageWeeks: number = 28
 ): Promise<TriageResponse> => {
   try {
-    const response = await fetch("http://127.0.0.1:8000/api/chat", {
+    const response = await fetch(`${BACKEND_URL}/api/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -40,7 +43,7 @@ export const transcribeAudioFile = async (audioBlob: Blob): Promise<string> => {
     const formData = new FormData();
     formData.append("file", audioBlob, "recording.wav");
 
-    const response = await fetch("http://127.0.0.1:8000/api/transcribe", {
+    const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
       method: "POST",
       body: formData,
     });
