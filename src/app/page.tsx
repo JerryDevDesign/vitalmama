@@ -61,6 +61,34 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
+  // Helper function to dynamically speak any incoming text response
+  const speakTriageResponse = (text: string) => {
+    if (!synthRef.current) return;
+
+    // Cancel any current ongoing speech to avoid overlaps
+    synthRef.current.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utteranceRef.current = utterance;
+
+    // Search for a natural, comforting English/local-sounding voice
+    const voices = synthRef.current.getVoices();
+    const selectedVoice = voices.find(
+      (v) => v.lang.includes("en-NG") || v.lang.includes("en-GB") || v.lang.includes("en-US")
+    );
+    if (selectedVoice) utterance.voice = selectedVoice;
+
+    // Slower pacing for stress-free clinical comprehension
+    utterance.rate = 0.95; 
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => setIsPlaying(true);
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = () => setIsPlaying(false);
+
+    synthRef.current.speak(utterance);
+  };
+
   const toggleVoiceGuide = () => {
     if (!synthRef.current) return;
 
@@ -70,22 +98,7 @@ export default function Home() {
     } else {
       const lastBotMessage = [...messages].reverse().find((m) => m.sender === "bot");
       if (!lastBotMessage) return;
-
-      synthRef.current.cancel();
-      const utterance = new SpeechSynthesisUtterance(lastBotMessage.text);
-      utteranceRef.current = utterance;
-
-      const voices = synthRef.current.getVoices();
-      const selectedVoice = voices.find(v => v.lang.includes("en-NG") || v.lang.includes("en-GB") || v.lang.includes("en"));
-      if (selectedVoice) utterance.voice = selectedVoice;
-
-      utterance.rate = 0.85; 
-      utterance.pitch = 1.0;
-      utterance.onend = () => setIsPlaying(false);
-      utterance.onerror = () => setIsPlaying(false);
-
-      setIsPlaying(true);
-      synthRef.current.speak(utterance);
+      speakTriageResponse(lastBotMessage.text);
     }
   };
 
@@ -162,17 +175,26 @@ export default function Home() {
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
-    const data = await sendTriageMessage(textToSend, 28);
+    try {
+      const data = await sendTriageMessage(textToSend, 28);
 
-    const botMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      sender: "bot",
-      text: data.response,
-      riskStatus: data.risk_status,
-    };
+      const botMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: "bot",
+        text: data.response,
+        riskStatus: data.risk_status,
+      };
 
-    setMessages((prev) => [...prev, botMsg]);
-    setIsLoading(false);
+      setMessages((prev) => [...prev, botMsg]);
+      setIsLoading(false);
+
+      // Speak the response immediately!
+      speakTriageResponse(data.response);
+
+    } catch (error) {
+      console.error("Failed to get triage response:", error);
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -231,24 +253,57 @@ export default function Home() {
 
                 {/* Chat Message Box */}
                 <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 flex flex-col">
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`max-w-[85%] rounded-2xl p-3.5 text-xs leading-relaxed shadow-sm ${
-                        msg.sender === "user"
-                          ? "bg-[#2E5A44] text-white self-end rounded-br-none"
-                          : "bg-white text-slate-800 self-start rounded-bl-none border border-slate-100"
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-                      {msg.riskStatus && (
-                        <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center gap-1.5">
-                          <span className={`inline-block w-2.5 h-2.5 rounded-full ${msg.riskStatus === "Critical" ? "bg-red-500 animate-pulse" : "bg-emerald-500"}`} />
-                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Triage Status: {msg.riskStatus}</span>
+                  {messages.map((msg) => {
+                    const isUser = msg.sender === "user";
+                    const isCritical = msg.riskStatus === "Critical";
+
+                    return (
+                      <React.Fragment key={msg.id}>
+                        <div
+                          className={`max-w-[85%] rounded-2xl p-3.5 text-xs leading-relaxed shadow-sm ${
+                            isUser
+                              ? "bg-[#2E5A44] text-white self-end rounded-br-none"
+                              : isCritical
+                              ? "bg-red-50 text-slate-900 self-start rounded-bl-none border border-red-200"
+                              : "bg-white text-slate-800 self-start rounded-bl-none border border-slate-100"
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap">{msg.text}</p>
+                          {msg.riskStatus && (
+                            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center gap-1.5">
+                              <span className={`inline-block w-2.5 h-2.5 rounded-full ${isCritical ? "bg-red-500 animate-pulse" : "bg-emerald-500"}`} />
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                                Triage Status: {msg.riskStatus}
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {/* HIGH-RISK ACTIONABLE UI CARD: Displays immediately under a Critical triage status */}
+                        {isCritical && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="bg-gradient-to-br from-red-500 to-red-600 text-white p-4 rounded-2xl shadow-lg border border-red-400 space-y-3 mx-4 self-stretch text-center"
+                          >
+                            <div className="flex items-center justify-center gap-2">
+                              <AlertCircle className="h-5 w-5 animate-bounce text-white" />
+                              <h4 className="font-extrabold text-xs uppercase tracking-wider">Critical Danger Detected</h4>
+                            </div>
+                            <p className="text-[11px] leading-relaxed text-red-50">
+                              Please go directly to the nearest Primary Healthcare Center (PHC)[cite: 1]! You can route transport and notify the medical dispatch grid immediately below.
+                            </p>
+                            <button
+                              onClick={() => setActiveTab("emergency")}
+                              className="bg-white text-red-600 font-extrabold py-2 px-4 rounded-xl text-[10px] w-full hover:bg-red-50 transition-colors shadow-md"
+                            >
+                              Open Emergency Dispatch Portal[cite: 1]
+                            </button>
+                          </motion.div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                   {isLoading && (
                     <div className="bg-white border border-slate-100 rounded-2xl p-3.5 text-xs self-start rounded-bl-none shadow-sm flex items-center gap-2">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-[#2E5A44]" />
@@ -321,8 +376,8 @@ export default function Home() {
               <motion.div key="emergency" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 p-6 space-y-4 overflow-y-auto text-center justify-center flex flex-col">
                 <AlertCircle className="h-12 w-12 text-red-500 mx-auto animate-bounce" />
                 <h3 className="text-lg font-bold text-slate-800">Emergency Dispatch</h3>
-                <p className="text-xs text-slate-500">Instantly register critical cases directly to local transport networks.</p>
-                <button className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 rounded-2xl text-xs mt-4">Trigger Emergency Assistance</button>
+                <p className="text-xs text-slate-500">Instantly register critical cases directly to local transport networks[cite: 1].</p>
+                <button className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3.5 rounded-2xl text-xs mt-4">Trigger Emergency Assistance[cite: 1]</button>
               </motion.div>
             )}
           </AnimatePresence>
