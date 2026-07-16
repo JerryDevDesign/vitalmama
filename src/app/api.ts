@@ -3,31 +3,47 @@ export interface TriageResponse {
   risk_status: "Normal" | "Critical" | "Error";
 }
 
+// src/app/api.ts
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
 
-const response = await fetch(`${BACKEND_URL}/api/chat`, { ... })
+// --- Send Triage Message ---
+export async function sendTriageMessage(message: string, stageWeeks: number = 28) {
+  const response = await fetch(`${BACKEND_URL}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: message,
+      stage_weeks: stageWeeks,
+    }),
+  });
 
-const response = await fetch(`${BACKEND_URL}/api/transcribe`, { ... })
+  if (!response.ok) {
+    throw new Error("Failed to fetch triage response");
+  }
 
-export const sendTriageMessage = async (
-  userMessage: string,
-  stageWeeks: number = 28
-): Promise<TriageResponse> => {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: userMessage,
-        stage_weeks: stageWeeks,
-      }),
-    });
+  return response.json();
+}
 
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.statusText}`);
-    }
+// --- Transcribe Audio File ---
+export async function transcribeAudioFile(audioBlob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", audioBlob, "recording.wav");
+
+  const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to transcribe audio");
+  }
+
+  const data = await response.json();
+  return data.transcript;
+}
 
     const data = await response.json();
     return data as TriageResponse;
